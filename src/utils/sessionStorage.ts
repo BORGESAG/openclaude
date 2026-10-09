@@ -1979,6 +1979,7 @@ class Project {
    */
   private deletedSessionFiles = new Set<string>()
 
+  /** True when `filePath` is a transcript deleted earlier in this process. */
   isDeletedSessionFile(filePath: string): boolean {
     return (
       this.deletedSessionFiles.size > 0 &&
@@ -1998,6 +1999,18 @@ class Project {
     // Let an in-flight drain finish so no write lands after the caller
     // removes the file; queued appends for it are now skipped.
     await this.flush()
+    // flush() does not wait for direct appends. One that passed the deleted
+    // check before the path was marked can still be waiting on mkdir or the
+    // file lock, and would recreate the file after the caller removes it.
+    const inFlight = [...this.pendingDirectAppends]
+      .filter(([path]) => this.isDeletedSessionFile(path))
+      .flatMap(([, appends]) => [...appends])
+    await Promise.allSettled(inFlight)
+  }
+
+  /** Undo forgetDeletedSession for a transcript that could not be removed. */
+  restoreSessionWrites(transcriptPath: string): void {
+    this.deletedSessionFiles.delete(resolvePath(transcriptPath))
   }
 
   private async getExistingSessionFile(
@@ -2238,6 +2251,14 @@ export async function forgetDeletedSession(
   transcriptPath: string,
 ): Promise<void> {
   await getProject().forgetDeletedSession(sessionId, transcriptPath)
+}
+
+/**
+ * Undo forgetDeletedSession when the transcript is still on disk (its removal
+ * failed), so this process keeps writing to it instead of dropping writes.
+ */
+export function restoreSessionWrites(transcriptPath: string): void {
+  getProject().restoreSessionWrites(transcriptPath)
 }
 
 /**

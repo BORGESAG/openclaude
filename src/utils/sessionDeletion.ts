@@ -1,6 +1,7 @@
+import { existsSync } from 'fs'
 import { rm } from 'fs/promises'
 import { basename, dirname, join } from 'path'
-import { forgetDeletedSession } from './sessionStorage.js'
+import { forgetDeletedSession, restoreSessionWrites } from './sessionStorage.js'
 import { validateUuid } from './uuid.js'
 
 export type DeleteSessionResult =
@@ -51,9 +52,16 @@ export async function deleteSessionFiles({
     join(projectDir, `${id}.replay.json`),
     join(projectDir, id),
   ]
-  // force: sidecars are optional, so a missing one is not an error.
-  await Promise.all(
-    targets.map(target => rm(target, { recursive: true, force: true })),
-  )
+  try {
+    // force: sidecars are optional, so a missing one is not an error.
+    await Promise.all(
+      targets.map(target => rm(target, { recursive: true, force: true })),
+    )
+  } catch (error) {
+    // The transcript survived (e.g. EBUSY on Windows): stop dropping writes
+    // to it, or disk and this process disagree until restart.
+    if (existsSync(transcriptPath)) restoreSessionWrites(transcriptPath)
+    throw error
+  }
   return { ok: true, removed: targets }
 }

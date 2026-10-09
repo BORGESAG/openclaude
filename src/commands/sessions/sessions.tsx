@@ -40,6 +40,7 @@ type OnResume = (
 const SESSIONS_LIST_HINT =
   '↑/↓ navigate · Enter options · d d delete · Esc close'
 
+/** Stable React key and focus id for a saved conversation row. */
 function sessionKey(log: LogOption): string {
   return getSessionIdFromLog(log) ?? log.fullPath ?? String(log.value)
 }

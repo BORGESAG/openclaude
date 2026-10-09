@@ -1,7 +1,8 @@
-import { afterEach, beforeEach, expect, test } from 'bun:test'
+import { afterEach, beforeEach, expect, mock, spyOn, test } from 'bun:test'
 import { type UUID } from 'node:crypto'
 import { existsSync } from 'node:fs'
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
+import * as fsPromises from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 
@@ -56,6 +57,7 @@ beforeEach(async () => {
 
 afterEach(async () => {
   try {
+    mock.restore()
     for (const [key, value] of Object.entries(savedEnv)) {
       if (value === undefined) delete process.env[key]
       else process.env[key] = value
@@ -122,4 +124,29 @@ test('writes queued before the delete are dropped, not flushed after it', async 
   await flushSessionStorage()
 
   expect(existsSync(transcript)).toBe(false)
+})
+
+test('a transcript that could not be removed keeps receiving writes', async () => {
+  const transcript = await writtenOtherSession()
+  const realRm = fsPromises.rm
+  spyOn(fsPromises, 'rm').mockImplementation(async (path, options) => {
+    if (path === transcript) {
+      throw Object.assign(new Error('resource busy or locked'), { code: 'EBUSY' })
+    }
+    return realRm(path, options)
+  })
+
+  await expect(
+    deleteSessionFiles({
+      sessionId: DELETED,
+      transcriptPath: transcript,
+      currentSessionId: ACTIVE,
+    }),
+  ).rejects.toThrow('resource busy or locked')
+  mock.restore()
+
+  await recordGoalState(createGoalState('after failed delete'), DELETED)
+  await flushSessionStorage()
+
+  expect(await readFile(transcript, 'utf8')).toContain('after failed delete')
 })
