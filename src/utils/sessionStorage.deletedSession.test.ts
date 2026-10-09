@@ -150,3 +150,30 @@ test('a transcript that could not be removed keeps receiving writes', async () =
 
   expect(await readFile(transcript, 'utf8')).toContain('after failed delete')
 })
+
+test('a sidecar failing first does not restore writes while the transcript is removed', async () => {
+  const transcript = await writtenOtherSession()
+  const realRm = fsPromises.rm
+  spyOn(fsPromises, 'rm').mockImplementation(async (path, options) => {
+    if (path === transcript) {
+      // Still removing when the sidecar below has already failed.
+      await new Promise(resolve => setTimeout(resolve, 20))
+    } else if (String(path).endsWith('.cast')) {
+      throw Object.assign(new Error('operation not permitted'), { code: 'EPERM' })
+    }
+    return realRm(path, options)
+  })
+
+  const result = await deleteSessionFiles({
+    sessionId: DELETED,
+    transcriptPath: transcript,
+    currentSessionId: ACTIVE,
+  })
+  mock.restore()
+  expect(result.ok).toBe(true)
+
+  await recordGoalState(createGoalState('late goal'), DELETED)
+  await flushSessionStorage()
+
+  expect(existsSync(transcript)).toBe(false)
+})

@@ -1,6 +1,7 @@
 import { existsSync } from 'fs'
 import { rm } from 'fs/promises'
 import { basename, dirname, join } from 'path'
+import { logError } from './log.js'
 import { forgetDeletedSession, restoreSessionWrites } from './sessionStorage.js'
 import { validateUuid } from './uuid.js'
 
@@ -52,16 +53,26 @@ export async function deleteSessionFiles({
     join(projectDir, `${id}.replay.json`),
     join(projectDir, id),
   ]
-  try {
-    // force: sidecars are optional, so a missing one is not an error.
-    await Promise.all(
-      targets.map(target => rm(target, { recursive: true, force: true })),
-    )
-  } catch (error) {
+  // force: sidecars are optional, so a missing one is not an error.
+  // allSettled: decide on the transcript only after every removal finished,
+  // or a fast sidecar failure would restore writes mid-removal.
+  const results = await Promise.allSettled(
+    targets.map(target => rm(target, { recursive: true, force: true })),
+  )
+  const failures = results.flatMap(result =>
+    result.status === 'rejected' ? [result.reason] : [],
+  )
+  if (failures.length > 0 && existsSync(transcriptPath)) {
     // The transcript survived (e.g. EBUSY on Windows): stop dropping writes
     // to it, or disk and this process disagree until restart.
-    if (existsSync(transcriptPath)) restoreSessionWrites(transcriptPath)
-    throw error
+    restoreSessionWrites(transcriptPath)
+    throw failures[0]
   }
-  return { ok: true, removed: targets }
+  // The transcript is gone, so the conversation is deleted; a sidecar that
+  // could not be removed is only an orphan, like any missing one.
+  for (const failure of failures) logError(failure)
+  return {
+    ok: true,
+    removed: targets.filter((_, i) => results[i]!.status === 'fulfilled'),
+  }
 }
