@@ -19,6 +19,7 @@ import {
 import { createGoalState } from '../services/goal/state.js'
 import { setClaudeConfigHomeDirForTesting } from './envUtils.js'
 import { deleteSessionFiles } from './sessionDeletion.js'
+import * as sessionStorage from './sessionStorage.js'
 import {
   flushSessionStorage,
   getTranscriptPathForSession,
@@ -176,4 +177,30 @@ test('a sidecar failing first does not restore writes while the transcript is re
   await flushSessionStorage()
 
   expect(existsSync(transcript)).toBe(false)
+})
+
+test('a failed deletion barrier keeps the transcript writable', async () => {
+  const transcript = await writtenOtherSession()
+  const realForget = sessionStorage.forgetDeletedSession
+  // Marks the path, then fails like a flush whose pending write errored.
+  spyOn(sessionStorage, 'forgetDeletedSession').mockImplementation(
+    async (sessionId, path) => {
+      await realForget(sessionId, path)
+      throw new Error('pending write failed')
+    },
+  )
+
+  await expect(
+    deleteSessionFiles({
+      sessionId: DELETED,
+      transcriptPath: transcript,
+      currentSessionId: ACTIVE,
+    }),
+  ).rejects.toThrow('pending write failed')
+  mock.restore()
+
+  await recordGoalState(createGoalState('after failed barrier'), DELETED)
+  await flushSessionStorage()
+
+  expect(await readFile(transcript, 'utf8')).toContain('after failed barrier')
 })

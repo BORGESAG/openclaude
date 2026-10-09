@@ -44,7 +44,14 @@ export async function deleteSessionFiles({
 
   // Block later writes first, or a pending AI title/summary/metadata append
   // recreates the transcript and the session comes back.
-  await forgetDeletedSession(id, transcriptPath)
+  try {
+    await forgetDeletedSession(id, transcriptPath)
+  } catch (error) {
+    // Nothing was removed (a pending write failed while settling): undo the
+    // mark so the still-present transcript keeps receiving writes.
+    restoreSessionWrites(transcriptPath)
+    throw error
+  }
 
   const projectDir = dirname(transcriptPath)
   const targets = [
