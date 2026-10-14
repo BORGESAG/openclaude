@@ -32,6 +32,7 @@ import {
 } from './sessionStorage.js'
 
 const SESSION = '00000000-0000-4000-8000-00000000c001' as UUID
+const OTHER = '00000000-0000-4000-8000-00000000c002' as UUID
 const tempDirs: string[] = []
 const savedEnv = {
   NODE_ENV: process.env.NODE_ENV,
@@ -119,6 +120,26 @@ test('the first real prompt saves the session with the earlier commands', async 
     .map(line => JSON.parse(line).uuid)
   for (const message of [...commands, prompt]) {
     expect(uuids).toContain(message.uuid)
+  }
+})
+
+test('commands buffered for one session are not written into the next one', async () => {
+  const commands = localCommand('model', 'Set model to test')
+  await recordTranscript(commands)
+  // An SDK-style switch: the active session changes without resetting the
+  // shared session-file pointer.
+  switchSession(OTHER as never)
+  const prompt = createUserMessage({ content: 'explain this repo' })
+  await recordTranscript([prompt])
+  await flushSessionStorage()
+
+  const uuids = (await readFile(getTranscriptPathForSession(OTHER), 'utf8'))
+    .trim()
+    .split('\n')
+    .map(line => JSON.parse(line).uuid)
+  expect(uuids).toContain(prompt.uuid)
+  for (const message of commands) {
+    expect(uuids).not.toContain(message.uuid)
   }
 })
 

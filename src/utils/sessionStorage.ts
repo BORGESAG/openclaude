@@ -940,6 +940,9 @@ class Project {
   // Entries buffered while sessionFile is null. Flushed by materializeSessionFile
   // on the first user/assistant message — prevents metadata-only session files.
   private pendingEntries: Entry[] = []
+  // Session the buffered entries belong to; a switch drops them so they are
+  // not written into the next session's transcript.
+  private pendingEntriesSessionId: UUID | null = null
   private remoteIngressUrl: string | null = null
   private internalEventWriter: InternalEventWriter | null = null
   private internalEventReader: InternalEventReader | null = null
@@ -1271,6 +1274,18 @@ class Project {
   resetSessionFile(): void {
     this.sessionFile = null
     this.pendingEntries = []
+    this.pendingEntriesSessionId = null
+  }
+
+  /** Drops buffered entries that belong to a session other than `sessionId`. */
+  private dropForeignPendingEntries(sessionId: UUID): void {
+    if (
+      this.pendingEntriesSessionId !== null &&
+      this.pendingEntriesSessionId !== sessionId
+    ) {
+      this.pendingEntries = []
+      this.pendingEntriesSessionId = null
+    }
   }
 
   /**
@@ -1602,12 +1617,14 @@ class Project {
     // (not appendEntry) so it would bypass the per-entry persistence check
     // and create a metadata-only file despite --no-session-persistence.
     if (this.shouldSkipPersistence()) return
+    this.dropForeignPendingEntries(getSessionId() as UUID)
     this.ensureCurrentSessionFile()
     // mode/agentSetting are cache-only pre-materialization; write them now.
     this.reAppendSessionMetadata()
     if (this.pendingEntries.length > 0) {
       const buffered = this.pendingEntries
       this.pendingEntries = []
+      this.pendingEntriesSessionId = null
       for (const entry of buffered) {
         await this.appendEntry(entry)
       }
@@ -1814,6 +1831,8 @@ class Project {
     if (isCurrentSession) {
       // Buffer until materializeSessionFile runs (first user/assistant message).
       if (this.sessionFile === null) {
+        this.dropForeignPendingEntries(currentSessionId)
+        this.pendingEntriesSessionId = currentSessionId
         this.pendingEntries.push(entry)
         return
       }
