@@ -249,6 +249,29 @@ describe('/sessions', () => {
     expect(mounted.resume.mock.calls[0]?.[2]).toBe('slash_command_picker')
   })
 
+  test('a transcript that fails to load leaves the list usable', async () => {
+    const real = await import('../../utils/sessionStorage.js')
+    mock.module('../../utils/sessionStorage.js', () => ({
+      ...real,
+      getSessionIdFromLog: (log: LogOption) => log.sessionId,
+      isLiteLog: () => true,
+      loadFullLog: () => Promise.reject(new Error('transcript unreadable')),
+      loadSameRepoMessageLogs: () =>
+        Promise.resolve(allLogs.filter(log => existsSync(log.fullPath!))),
+    }))
+    mounted = await runSessions()
+    await mounted.waitFor(f => f.includes('Sessions (3)'))
+    await mounted.press(DOWN, ENTER)
+    await mounted.waitFor(f => f.includes('Return to the list'))
+    await mounted.press(ENTER)
+    await mounted.waitFor(f => f.includes('transcript unreadable'))
+    expect(mounted.resume.mock.calls.length).toBe(0)
+
+    // Not stuck as busy: the list still takes input.
+    await mounted.press(ENTER)
+    await mounted.waitFor(f => f.includes('Return to the list'))
+  })
+
   test('reports when there is nothing to list', async () => {
     allLogs = []
     mounted = await runSessions()

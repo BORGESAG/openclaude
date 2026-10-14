@@ -143,8 +143,20 @@ function SessionsManager({
       return
     }
     setBusy(true)
-    const fullLog = isLiteLog(log) ? await loadFullLog(log) : log
-    await onResume(sessionId, fullLog, 'slash_command_picker')
+    try {
+      const fullLog = isLiteLog(log) ? await loadFullLog(log) : log
+      await onResume(sessionId, fullLog, 'slash_command_picker')
+    } catch (error) {
+      // Loading the transcript failed (onResume reports its own errors): stay
+      // usable instead of leaving the dialog stuck as busy.
+      logError(error as Error)
+      setNotice({
+        text: `Failed to resume "${getLogDisplayTitle(log)}": ${(error as Error).message}`,
+        error: true,
+      })
+      setBusy(false)
+      backToList(log)
+    }
   }
 
   useInput(
