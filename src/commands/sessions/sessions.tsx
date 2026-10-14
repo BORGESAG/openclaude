@@ -145,6 +145,11 @@ function SessionsManager({
     setBusy(true)
     try {
       const fullLog = isLiteLog(log) ? await loadFullLog(log) : log
+      // loadFullLog falls back to the message-less lite log when the
+      // transcript can't be read; resuming it would open an empty conversation.
+      if (isLiteLog(fullLog)) {
+        throw new Error('Transcript could not be loaded')
+      }
       await onResume(sessionId, fullLog, 'slash_command_picker')
     } catch (error) {
       // Loading the transcript failed (onResume reports its own errors): stay

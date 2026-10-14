@@ -249,13 +249,16 @@ describe('/sessions', () => {
     expect(mounted.resume.mock.calls[0]?.[2]).toBe('slash_command_picker')
   })
 
-  test('a transcript that fails to load leaves the list usable', async () => {
+  test('a transcript that fails to load is not resumed and leaves the list usable', async () => {
+    // Real loadFullLog (kept by beforeEach's spread): the test transcripts hold
+    // no messages, so it falls back to the lite log, as for unreadable files.
     const real = await import('../../utils/sessionStorage.js')
     mock.module('../../utils/sessionStorage.js', () => ({
       ...real,
       getSessionIdFromLog: (log: LogOption) => log.sessionId,
-      isLiteLog: () => true,
-      loadFullLog: () => Promise.reject(new Error('transcript unreadable')),
+      // beforeEach stubs isLiteLog to false; restore the upstream check.
+      isLiteLog: (log: LogOption) =>
+        log.messages.length === 0 && log.sessionId !== undefined,
       loadSameRepoMessageLogs: () =>
         Promise.resolve(allLogs.filter(log => existsSync(log.fullPath!))),
     }))
@@ -264,7 +267,7 @@ describe('/sessions', () => {
     await mounted.press(DOWN, ENTER)
     await mounted.waitFor(f => f.includes('Return to the list'))
     await mounted.press(ENTER)
-    await mounted.waitFor(f => f.includes('transcript unreadable'))
+    await mounted.waitFor(f => f.includes('Transcript could not be loaded'))
     expect(mounted.resume.mock.calls.length).toBe(0)
 
     // Not stuck as busy: the list still takes input.
